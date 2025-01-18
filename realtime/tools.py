@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Conversation history
-conversation_history: List[Dict[str, Any]] = []
+
 
 def log_tool_call(tool_name: str, inputs: Dict[str, Any], output: str, details: str = None):
     """Log tool calls and update conversation history"""
@@ -257,8 +257,13 @@ async def show_whale_routes_handler(region, season="current"):
 """
 
         await cl.Message(content=message_content).send()
-        result = f"Whale protection measures displayed for {region}"
-        log_tool_call("show_whale_routes", {"region": region, "season": season}, result, message_content)
+        
+        # Return both status and full details
+        result = {
+            "status": f"Whale protection measures displayed for {region}",
+            "details": message_content
+        }
+        log_tool_call("show_whale_routes", {"region": region, "season": season}, result)
         return result
     except Exception as e:
         error_msg = f"Error in show_whale_routes: {str(e)}"
@@ -286,23 +291,30 @@ async def check_routes_handler(region, date_range="next 7 days"):
             log_tool_call("check_routes", {"region": region, "date_range": date_range}, result)
             return result
 
+        # Create message content with markdown table
         message_content = f"""
-## Vessel Routes Through {region}
-### Period: {date_range}
+# Vessel Routes Through {region}
+*Period: {date_range}*
 
-| Vessel Name | IMO Number | ETA | Route |
-|-------------|------------|-----|-------|
+| Vessel Name | IMO Number | ETA | Origin | Destination |
+|-------------|------------|-----|--------|-------------|
 """
+        
         for vessel in vessel_routes[region]:
-            message_content += f"| {vessel['vessel_name']} | {vessel['imo']} | {vessel['eta']} | {vessel['route']} |\n"
+            origin, destination = vessel['route'].split(" → ")
+            message_content += f"| {vessel['vessel_name']} | {vessel['imo']} | {vessel['eta']} | {origin} | {destination} |\n"
 
-        message_content += """
-[REF: VTS-ROUTE-LOG | UPD-FREQ: 4H | SOURCE: AIS-TRACK-001]
-"""
+        message_content += "\n*[REF: VTS-ROUTE-LOG | UPD-FREQ: 4H | SOURCE: AIS-TRACK-001]*"
 
+        # Send single message with complete table
         await cl.Message(content=message_content).send()
-        result = f"Vessel routes displayed for {region}"
-        log_tool_call("check_routes", {"region": region, "date_range": date_range}, result, message_content)
+        
+        # Return both status and full details
+        result = {
+            "status": f"Vessel routes displayed for {region}",
+            "details": message_content
+        }
+        log_tool_call("check_routes", {"region": region, "date_range": date_range}, result)
         return result
     except Exception as e:
         error_msg = f"Error in check_routes: {str(e)}"
@@ -339,12 +351,17 @@ Priority Level: {priority.upper()}
 """
 
         await cl.Message(content=message_content).send()
-        result = f"Notifications sent to {len(vessel_ids)} vessels"
+        
+        # Return both status and full details
+        result = {
+            "status": f"Notifications sent to {len(vessel_ids)} vessels",
+            "details": message_content
+        }
         log_tool_call("send_notification", {
             "vessel_ids": vessel_ids,
             "message": message,
             "priority": priority
-        }, result, message_content)
+        }, result)
         return result
     except Exception as e:
         error_msg = f"Error in send_notification: {str(e)}"

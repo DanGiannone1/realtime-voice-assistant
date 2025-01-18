@@ -12,6 +12,7 @@ import base64
 import traceback
 from chainlit.logger import logger
 from chainlit.config import config
+import logging
 
 
 def float_to_16bit_pcm(float32_array):
@@ -167,6 +168,8 @@ class RealtimeConversation:
     
     def __init__(self):
         self.clear()
+        self.turn_counter = 0
+        self.logger = logging.getLogger(__name__)
 
     def clear(self):
         self.item_lookup = {}
@@ -176,15 +179,55 @@ class RealtimeConversation:
         self.queued_speech_items = {}
         self.queued_transcript_items = {}
         self.queued_input_audio = None
+        self.turn_counter = 0
 
-    def queue_input_audio(self, input_audio):
-        self.queued_input_audio = input_audio
+    def _log_conversation_state(self):
+        """Log the current state of the conversation"""
+        self.turn_counter += 1
+        self.logger.info(f"\n{'='*40} Conversation Turn #{self.turn_counter} {'='*40}")
+        
+        # Log all items in sequence
+        for idx, item in enumerate(self.items, 1):
+            item_type = item.get('type', 'unknown')
+            if item_type == 'message':
+                text = item.get('formatted', {}).get('text', '')
+                transcript = item.get('formatted', {}).get('transcript', '')
+                self.logger.info(f"\nMessage #{idx} from {item.get('role', 'unknown')}:")
+                if transcript:
+                    self.logger.info(f"Transcript: {transcript}")
+                if text and text != transcript:
+                    self.logger.info(f"Text: {text}")
+            elif item_type == 'function_call':
+                self.logger.info(f"\nTool Call #{idx}:")
+                self.logger.info(f"Tool: {item.get('formatted', {}).get('tool', {}).get('name')}")
+                self.logger.info(f"Arguments: {item.get('formatted', {}).get('tool', {}).get('arguments')}")
+            elif item_type == 'function_call_output':
+                self.logger.info(f"\nTool Result #{idx}:")
+                try:
+                    output_json = json.loads(item.get('formatted', {}).get('output', '{}'))
+                    if isinstance(output_json, str):
+                        self.logger.info(f"Status: {output_json}")
+                    else:
+                        self.logger.info(f"Full Output:\n{json.dumps(output_json, indent=2)}")
+                except:
+                    self.logger.info(f"Output: {item.get('formatted', {}).get('output', '')}")
+        
+        self.logger.info(f"\n{'='*100}\n")
 
     def process_event(self, event, *args):
         event_processor = self.EventProcessors.get(event['type'])
         if not event_processor:
             raise Exception(f"Missing conversation event processor for {event['type']}")
-        return event_processor(self, event, *args)
+        result = event_processor(self, event, *args)
+        
+        # Log after processing certain types of events
+        if event['type'] in ['conversation.item.created', 'response.output_item.done']:
+            self._log_conversation_state()
+        
+        return result
+
+    def queue_input_audio(self, input_audio):
+        self.queued_input_audio = input_audio
 
     def get_item(self, id):
         return self.item_lookup.get(id)
@@ -263,8 +306,14 @@ class RealtimeConversation:
         if not item:
             self.queued_transcript_items[item_id] = {'transcript': formatted_transcript}
             return None, None
+        
+        # Update both the content and formatted text
         item['content'][content_index]['transcript'] = transcript
         item['formatted']['transcript'] = formatted_transcript
+        if item['type'] == 'message' and item['role'] == 'user':
+            item['formatted']['text'] = formatted_transcript  # Also update the text field for messages
+            self.logger.info(f"\nTranscribed Audio -> Text: {formatted_transcript}")
+        
         return item, {'transcript': transcript}
 
     def _process_speech_started(self, event):
