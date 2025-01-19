@@ -4,4 +4,6 @@ yfinance
 plotly
 websockets
 pydantic==2.10.1
-
+azure-cosmos==4.5.1
+azure-identity
+azure-communication-email

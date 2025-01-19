@@ -7,7 +7,7 @@ from uuid import uuid4
 from chainlit.logger import logger
 
 from realtime import RealtimeClient
-from realtime.tools import tools
+from realtime.tools import tools, cosmos_db
 
 client = AsyncAzureOpenAI(api_key=os.environ["AZURE_OPENAI_API_KEY"],
                           azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
@@ -77,12 +77,14 @@ system_prompt = """You are an internal agent for MSC. You help employees do thei
 
 1. **Identify the question:** Carefully read the employee's inquiry to understand the problem or question they are presenting.
 2. **Gather Relevant Information:** Consider what tools you have available. Check for any additional data needed, which will be the inputs to the tools. 
-3. **Formulate a Response:** Use the tools to answer the question.
+3. **Formulate a Response:** Use the tools to answer the question. Consider the conversation history when deciding the inputs to the tools. For example, if the user asks for whale migration patterns 
+in the Gulf of St. Lawrence, and then you provided the info, if the user then asks for "which of our routesare impacted by this", you can assume they are asking about routes through the Gulf of St. Lawrence.
 
 
 # Output Format
 
-Be very brief and concise. Generally the tool will provide the core information. You just need to quickly summarize in 1-2 sentences or less. Do not include notes or disclaimers.
+Be very brief and concise. Generally the tool will provide the core information. You just need to quickly summarize in 1-2 sentences or less. Do not include notes or disclaimers. 
+If the query is answered via a tool call, just simply state that you have provided the information and ask "whats next?" (we want to be goal-oriented and work quickly). If the user asks for clarification or insights, feel free to share your thoughts.
 
 # Tools
 
@@ -102,17 +104,34 @@ Be very brief and concise. Generally the tool will provide the core information.
      - date_range (optional): Date range to check (defaults to "next 7 days")
 
 3. `send_notification`
-   - Sends notifications to vessels about whale protection measures
+   - Sends notifications to vessels about whale protection measures. Make sure to confirm the message contents with the user before actually calling this tool.
    - Parameters:
      - vessel_ids (required): List of vessel IMO numbers
      - message (required): The notification message
      - priority (optional): "high", "medium", or "low" (defaults to "medium")
+
+4. `create_ticket`
+   - Creates support tickets in Bridge for customer impact outreach
+   - Automatically identifies major customers impacted by vessel disruptions
+   - Parameters:
+     - title (required): Title of the ticket
+     - vessel_imos (required): List of impacted vessel IMO numbers
+     - description (required): Detailed description of the impact and required outreach
 
  
 # """
 
 @cl.on_chat_start
 async def start():
+    # Verify Cosmos DB connection is ready
+    try:
+        # Test query to verify connection
+        cosmos_db.query_items("SELECT TOP 1 * FROM c")
+        logger.info("Cosmos DB connection verified")
+    except Exception as e:
+        logger.error(f"Failed to connect to Cosmos DB: {e}")
+        await cl.Message(content="⚠️ Warning: Database connection is not available. Some features may be limited.").send()
+
     await cl.Message(
         content="Hi, how can I help you?. Press `P` to talk!"
     ).send()
